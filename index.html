@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>QR見積スキャナ（iOS拡張版 v3）/ QR Quote Scanner (iOS Extended v3)</title>
+  <style>
+    :root{ --bg:#0f172a;--card:#111827;--muted:#94a3b8;--text:#e5e7eb;--line:#1f2937;--accent:#22c55e }
+    *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans JP","Hiragino Kaku Gothic ProN","Yu Gothic UI",sans-serif}
+    body{margin:0;background:linear-gradient(180deg,#0b1220,#0e1726 30%,#0b1220 100%);color:var(--text)}
+    header{padding:20px 16px 8px;text-align:center}
+    h1{margin:0;font-size:20px;letter-spacing:.2px}
+    .sub{color:var(--muted);font-size:12px;margin-top:6px}
+    main{max-width:980px;margin:14px auto 120px;padding:0 12px;display:flex;flex-direction:column;gap:12px}
+    .card{background:rgba(17,24,39,.7);backdrop-filter: blur(6px);border:1px solid var(--line);border-radius:14px;padding:12px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    button{padding:10px 14px;border:1px solid var(--line);background:#132037;color:var(--text);border-radius:10px;cursor:pointer}
+    button.primary{background:linear-gradient(135deg,#2563eb,#22c55e);border-color:#1e293b}
+    label{font-size:12px;color:var(--muted)}
+    input[type="checkbox"]{transform:scale(1.1)}
+    textarea{width:100%;min-height:96px;background:#0b1220;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:8px}
+    .kpi{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    @media (max-width:820px){.kpi{grid-template-columns:1fr}}
+    .kpi .item{background:#0b1220;border:1px solid var(--line);border-radius:12px;padding:12px}
+    .kpi .label{font-size:11px;color:var(--muted)}
+    .kpi .value{font-size:18px;margin-top:6px}
+    table{width:100%;border-collapse:collapse;margin-top:8px;font-size:12.5px}
+    th,td{border:1px solid var(--line);padding:8px;text-align:right}
+    th{background:#0b1220;color:#cbd5e1}
+    td.left, th.left{text-align:left}
+    .muted{color:#93a1b3}
+    .foot{position:fixed;left:0;right:0;bottom:0;background:#0b1426;color:#94a3b8;border-top:1px solid #1f2937;padding:12px 16px;font-size:.9rem;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    .videoWrap{display:none;position:relative}
+    video{width:100%;border-radius:12px;border:1px solid var(--line)}
+    .overlay{position:absolute;inset:0;border:2px dashed rgba(255,255,255,.25);border-radius:12px;pointer-events:none}
+    .small{font-size:11px;color:#93a1b3}
+    .ok{color:#22c55e}
+    .err{color:#f87171}
+    .warn{color:#fbbf24}
+    .pill{font-size:11px;padding:4px 8px;border:1px solid var(--line);border-radius:999px;background:#0b1220}
+  </style>
+  <script defer src="https://unpkg.com/@zxing/library@0.20.0"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+</head>
+<body>
+  <header>
+    <h1>QR見積スキャナ（iOS拡張版 v3）</h1>
+    <div class="sub">アルバム / カメラ / ライブスキャンに対応。カメラはHTTPS必須。</div>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="row">
+        <button id="scanBtn" class="primary">🎥 ライブスキャン（カメラ映像）</button>
+        <input id="filePickAlbum" type="file" accept="image/*" style="display:none"/>
+        <input id="filePickCamera" type="file" accept="image/*;capture=camera" capture="environment" style="display:none"/>
+        <button id="pickBtn">🖼 写真から読み込む（アルバム）</button>
+        <button id="shootBtn">📸 カメラで撮って読み込む</button>
+        <button id="pasteBtn">✍️ 手動ペースト</button>
+        <button id="demoBtn" class="pill">🔧 デモJSONで試す</button>
+        <label style="display:flex;gap:6px;align-items:center;margin-left:auto">
+          <input id="incMisc" type="checkbox" checked/>
+          <span>OGマージンに<b>雑費を含める</b></span>
+        </label>
+      </div>
+
+      <div class="videoWrap" id="videoWrap">
+        <video id="video" playsinline muted></video>
+        <div class="overlay"></div>
+        <div class="row" style="margin-top:8px;justify-content:space-between">
+          <div class="small" id="scanMode">読み取り中…</div>
+          <button id="stopBtn">停止 / Stop</button>
+        </div>
+      </div>
+
+      <div id="pasteArea" style="display:none;margin-top:8px">
+        <label>QRのJSON文字列を貼り付け / Paste JSON from QR</label>
+        <textarea id="jsonText" placeholder='{"v":"OG-Quote-INPUT-v1","fxJpyIdr":"0x2A","products":[...]}'></textarea>
+        <div class="row" style="justify-content:flex-end">
+          <button id="parseBtn" class="primary">解析 / Parse</button>
+        </div>
+      </div>
+
+      <div id="status" class="small muted" style="margin-top:6px">準備完了 / Ready.</div>
+      <div class="small warn" style="margin-top:6px">※ ライブ/カメラ利用は<b>HTTPS</b>が必要。設定 → Safari → カメラ を「許可/確認」に。<br/>※ カメラ写真が<b>HEIC</b>の場合はCanvasに描けず失敗することがあります。スクショでPNG化 or 設定→カメラ→フォーマット→<b>互換性優先（JPEG）</b>に。</div>
+    </section>
+
+    <section class="card" id="results" style="display:none">
+      <h3 style="margin:0 0 6px">集計 / Totals</h3>
+      <div class="kpi">
+        <div class="item"><div class="label">全体 DPP（税前, IDR / JPY）</div><div class="value" id="kpiDpp">-</div></div>
+        <div class="item"><div class="label">全体 VAT（IDR / JPY）</div><div class="value" id="kpiVat">-</div></div>
+        <div class="item"><div class="label">最終（VAT込, IDR / JPY）</div><div class="value" id="kpiGrand">-</div></div>
+        <div class="item"><div class="label">平均（DPP / VAT込, IDR / JPY /台）</div><div class="value" id="kpiAvg">-</div></div>
+        <div class="item"><div class="label">トランスファ価格（合計 / 1台, IDR / JPY）</div><div class="value" id="kpiTransfer">-</div></div>
+      </div>
+
+      <h3 style="margin:10px 0 6px">内訳（PT.OG 税前販売価格の構成）/ Breakdown</h3>
+      <table>
+        <thead><tr><th class="left">項目 / Item</th><th>合計 / Total</th><th>1台 / Per Unit</th><th>通貨</th></tr></thead>
+        <tbody id="tbodyBreak"></tbody>
+      </table>
+
+      <h3 style="margin:10px 0 6px">製品別サマリー / Per-Product Summary</h3>
+      <table>
+        <thead>
+          <tr>
+            <th class="left">製品名</th><th>数量</th>
+            <th>利益 (IDR / JPY)</th>
+            <th>CIF (IDR / JPY)</th>
+            <th>BM (IDR / JPY)</th>
+            <th>PPh22 (IDR / JPY)</th>
+            <th>雑費 (IDR / JPY)</th>
+            <th>マージン (IDR / JPY)</th>
+            <th>DPP (IDR / JPY)</th>
+            <th>VAT (IDR / JPY)</th>
+            <th>最終 (IDR / JPY)</th>
+            <th>1台 DPP (IDR / JPY)</th>
+            <th>1台 VAT (IDR / JPY)</th>
+            <th>1台 最終 (IDR / JPY)</th>
+          </tr>
+        </thead>
+        <tbody id="tbodyProd"></tbody>
+      </table>
+      <div class="small" style="margin-top:8px">Parser: <b>OG-Quote-INPUT-v1</b>（HEX 0x?? OK）</div>
+    </section>
+  </main>
+
+  <div class="foot">
+    <span>Copyright 2025 KONGO INDUSTRIES CO LTD. Created by H.TAKASHIMA</span>
+    <span class="small">QR → 入力JSON → 同計算 / Scan → Parse → Compute</span>
+  </div>
+
+  <script>
+    // ===== Utilities =====
+    const $ = sel => document.querySelector(sel);
+    const fmtJPY = n => new Intl.NumberFormat('ja-JP',{style:'currency',currency:'JPY',maximumFractionDigits:0}).format(n||0);
+    const fmtIDR = n => new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n||0);
+    const toNum = (x)=>{
+      if(x==null) return 0;
+      if(typeof x === 'number') return x;
+      if(typeof x === 'string'){
+        const s = x.trim();
+        if(/^0x[0-9a-fA-F]+$/.test(s)) return parseInt(s,16);
+        const cleaned = s.replace(/[_ ,]/g,'');
+        if(/^[0-9]+(\\.[0-9]+)?$/.test(cleaned)) return +cleaned;
+      }
+      return +x || 0;
+    };
+    const pctToRatio = p => toNum(p)/100;
+    const pairFromIdr = (idr, fx)=>{
+      const jpy = fx>0 ? (idr/fx) : 0;
+      return fmtIDR(idr) + " / " + fmtJPY(jpy);
+    };
+
+    // ===== Core compute =====
+    function computeFromPayload(qr, includeMiscDefault=true){
+      const fx = toNum(qr.fxJpyIdr);
+      const containerCount = toNum(qr.containerCount);
+      const freightPerContainerJPY = toNum(qr.freightPerContainerJPY);
+      const pph22Pct = pctToRatio(qr.pph22Pct);
+      const ogMarginPct = pctToRatio(qr.ogMarginPct);
+      const vatPct = pctToRatio(qr.vatPct);
+      const incMiscFlag = (typeof qr.ogMarginIncludeMisc === 'boolean') ? qr.ogMarginIncludeMisc : includeMiscDefault;
+
+      const products = (qr.products||[]).map(p=>{
+        const unitJPY = toNum(p.unitJPY);
+        const qty = toNum(p.qty);
+        const marginPct = pctToRatio(p.marginPct);
+        const bmPct = pctToRatio(p.bmPct);
+        const miscIdrPerUnit = toNum(p.miscIdrPerUnit);
+        const unitWithMarginJPY = unitJPY * (1 + marginPct);
+        const subtotalJpy = unitWithMarginJPY * qty;
+        return { name: p.name||"", unitJPY, qty, marginPct, bmPct, miscIdrPerUnit, unitWithMarginJPY, subtotalJpy };
+      }).filter(p=>p.qty>0);
+
+      const totalQty = products.reduce((a,b)=>a+b.qty,0);
+      const productsSubtotalJpy = products.reduce((a,b)=>a+b.subtotalJpy,0);
+      const freightJPY = containerCount * freightPerContainerJPY;
+      const transferTotalJPY = productsSubtotalJpy + freightJPY;
+      const transferPerUnitJPY = totalQty>0 ? transferTotalJPY/totalQty : 0;
+
+      const cifTotalIDR = transferTotalJPY * fx;
+      const cifPerUnitIDR = totalQty>0 ? transferPerUnitJPY * fx : 0;
+
+      const prodAlloc = products.map(p=>{
+        const ratio = productsSubtotalJpy>0 ? (p.subtotalJpy / productsSubtotalJpy) : 0;
+        const cifAllocIdr = ratio * cifTotalIDR;
+        const bmIdr = cifAllocIdr * p.bmPct;
+        return { ...p, ratio, cifAllocIdr, bmIdr };
+      });
+
+      const bmTotalIDR = prodAlloc.reduce((a,b)=>a+b.bmIdr,0);
+      const miscTotalIDR = prodAlloc.reduce((a,b)=>a + (b.miscIdrPerUnit * b.qty), 0);
+      const pph22IDR = (cifTotalIDR + bmTotalIDR) * pph22Pct;
+
+      const baseNoMiscIDR = cifTotalIDR + bmTotalIDR + pph22IDR;
+      const baseForMarginIDR = incMiscFlag ? (baseNoMiscIDR + miscTotalIDR) : baseNoMiscIDR;
+
+      const ogMarginIDR = baseForMarginIDR * ogMarginPct;
+      const dppIDR = baseNoMiscIDR + ogMarginIDR + miscTotalIDR;
+      const vatIDR = dppIDR * vatPct;
+      const finalWithVATTotalIDR = dppIDR + vatIDR;
+      const finalPerUnitPreVAT = totalQty>0 ? dppIDR/totalQty : 0;
+      const finalPerUnitWithVAT = totalQty>0 ? finalWithVATTotalIDR/totalQty : 0;
+
+      const profitTotalIdr = prodAlloc.reduce((a,p)=>a + Math.max(0,(p.unitWithMarginJPY - p.unitJPY))*p.qty*fx,0);
+      const profitPerUnitIdr = totalQty>0 ? profitTotalIdr/totalQty : 0;
+
+      const perProducts = prodAlloc.map(p=>{
+        const profitJpy = Math.max(0,(p.unitWithMarginJPY - p.unitJPY)) * p.qty;
+        const profitIdr = profitJpy * fx;
+        const pph22Idr = (p.cifAllocIdr + p.bmIdr) * pph22Pct;
+        const miscIdrProd = p.miscIdrPerUnit * p.qty;
+        const baseNoMiscIdr_p = p.cifAllocIdr + p.bmIdr + pph22Idr;
+        const baseForMarginIdr_p = incMiscFlag ? (baseNoMiscIdr_p + miscIdrProd) : baseNoMiscIdr_p;
+        const marginIdr_p = baseForMarginIdr_p * ogMarginPct;
+        const dppIdr_p = baseNoMiscIdr_p + marginIdr_p + miscIdrProd;
+        const vatIdr_p = dppIdr_p * vatPct;
+        const finalIdr_p = dppIdr_p + vatIdr_p;
+        const dppPerUnitIdr_p = p.qty>0 ? dppIdr_p/p.qty : 0;
+        const vatPerUnitIdr_p = p.qty>0 ? vatIdr_p/p.qty : 0;
+        const finalPerUnitIdr_p = p.qty>0 ? finalIdr_p/p.qty : 0;
+        return {
+          name:p.name, qty:p.qty,
+          profitIdr, cifIdr:p.cifAllocIdr, bmIdr:p.bmIdr, pph22Idr, miscIdr:miscIdrProd,
+          marginIdr:marginIdr_p, dppIdr:dppIdr_p, vatIdr:vatIdr_p, finalIdr:finalIdr_p,
+          dppPerUnitIdr:dppPerUnitIdr_p, vatPerUnitIdr:vatPerUnitIdr_p, finalPerUnitIdr:finalPerUnitIdr_p
+        };
+      });
+
+      return { meta:{fx,totalQty,cifTotalIDR,cifPerUnitIDR}, totals:{dppIDR,vatIDR,finalWithVATTotalIDR,profitTotalIdr,profitPerUnitIdr,bmTotalIDR,miscTotalIDR,pph22IDR,ogMarginIDR,finalPerUnitPreVAT,finalPerUnitWithVAT}, perProducts };
+    }
+
+    function render(r){
+      const fx = toNum(r.meta.fx);
+      const pair = (v)=> pairFromIdr(v, fx);
+      $("#kpiDpp").textContent   = pair(r.totals.dppIDR);
+      $("#kpiVat").textContent   = pair(r.totals.vatIDR);
+      $("#kpiGrand").textContent = pair(r.totals.finalWithVATTotalIDR);
+      $("#kpiAvg").innerHTML     = pair(r.totals.finalPerUnitPreVAT)+ "<br/>" + pair(r.totals.finalPerUnitWithVAT);
+      $("#kpiTransfer").innerHTML= pair(r.meta.cifTotalIDR)+ "<br/>" + pair(r.meta.cifPerUnitIDR);
+
+      const rows = [
+        {n:'利益 / Profit', t:r.totals.profitTotalIdr, u:r.totals.profitPerUnitIdr},
+        {n:'CIF（製品小計+運賃）/ CIF', t:r.meta.cifTotalIDR, u:r.meta.cifPerUnitIDR},
+        {n:'BM（関税 合算）/ Duty', t:r.totals.bmTotalIDR, u:(r.meta.totalQty? r.totals.bmTotalIDR/r.meta.totalQty : 0)},
+        {n:'PPh22 Import', t:r.totals.pph22IDR, u:(r.meta.totalQty? r.totals.pph22IDR/r.meta.totalQty : 0)},
+        {n:'雑費 / Misc', t:r.totals.miscTotalIDR, u:(r.meta.totalQty? r.totals.miscTotalIDR/r.meta.totalQty : 0)},
+        {n:'OGマージン / OG Margin', t:r.totals.ogMarginIDR, u:(r.meta.totalQty? r.totals.ogMarginIDR/r.meta.totalQty : 0)},
+        {n:'DPP（税前）/ DPP', t:r.totals.dppIDR, u:(r.meta.totalQty? r.totals.dppIDR/r.meta.totalQty : 0)},
+        {n:'VAT', t:r.totals.vatIDR, u:(r.meta.totalQty? r.totals.vatIDR/r.meta.totalQty : 0)},
+        {n:'最終（VAT込）/ Grand Total', t:r.totals.finalWithVATTotalIDR, u:(r.meta.totalQty? r.totals.finalWithVATTotalIDR/r.meta.totalQty : 0)}
+      ];
+      const tb = $("#tbodyBreak"); tb.innerHTML="";
+      rows.forEach(rw=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class="left">${rw.n}</td><td>${pair(rw.t)}</td><td>${pair(rw.u)}</td><td>IDR / JPY</td>`;
+        tb.appendChild(tr);
+      });
+
+      const tp = $("#tbodyProd"); tp.innerHTML="";
+      r.perProducts.forEach(p=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="left">${p.name}</td>
+          <td>${p.qty.toLocaleString('ja-JP')}</td>
+          <td>${pair(p.profitIdr)}</td>
+          <td>${pair(p.cifIdr)}</td>
+          <td>${pair(p.bmIdr)}</td>
+          <td>${pair(p.pph22Idr)}</td>
+          <td>${pair(p.miscIdr)}</td>
+          <td>${pair(p.marginIdr)}</td>
+          <td>${pair(p.dppIdr)}</td>
+          <td>${pair(p.vatIdr)}</td>
+          <td>${pair(p.finalIdr)}</td>
+          <td>${pair(p.dppPerUnitIdr)}</td>
+          <td>${pair(p.vatPerUnitIdr)}</td>
+          <td>${pair(p.finalPerUnitIdr)}</td>
+        `;
+        tp.appendChild(tr);
+      });
+
+      $("#results").style.display = "";
+      $("#status").innerHTML = '<span class="ok">計算完了 / Computed.</span>';
+    }
+
+    // ===== Live scan (getUserMedia) with fallbacks =====
+    let stream = null, scanning = false, detector=null, zxingReader=null;
+    const ensureDetector = async()=>{
+      if('BarcodeDetector' in window){
+        try{
+          const fmts = await (window.BarcodeDetector?.getSupportedFormats?.() || []);
+          if(fmts.includes('qr_code')){ detector = new window.BarcodeDetector({formats:['qr_code']}); return true; }
+        }catch(e){}
+      }
+      return false;
+    };
+    const ensureZXing = ()=>{
+      if(window.ZXing && window.ZXing.BrowserQRCodeReader){ if(!zxingReader) zxingReader = new window.ZXing.BrowserQRCodeReader(); return true; }
+      return false;
+    };
+    const ensureJsQR = ()=> !!window.jsQR;
+
+    async function startScan(){
+      $("#status").textContent = "カメラ初期化中…";
+      const hasDetector = await ensureDetector();
+      const hasZX = ensureZXing();
+      const hasJQ = ensureJsQR();
+      try{
+        stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+      }catch(err){
+        $("#status").innerHTML = '<span class="err">カメラにアクセスできません。HTTPS/権限（設定→Safari→カメラ）を確認。</span>';
+        return;
+      }
+      const video = $("#video");
+      video.srcObject = stream; await video.play();
+      $("#videoWrap").style.display = ""; scanning = true;
+      $("#scanMode").textContent = hasDetector? "ネイティブ" : (hasZX? "ZXing" : (hasJQ? "jsQR" : "待機中"));
+      if(hasDetector) scanWithBarcodeDetector(video);
+      else if(hasZX) scanWithZXing(video);
+      else if(hasJQ) scanWithJsQR(video);
+      else setTimeout(()=>{
+        if(ensureZXing()) scanWithZXing(video);
+        else if(ensureJsQR()) scanWithJsQR(video);
+        else $("#status").innerHTML = '<span class="err">解析ライブラリが読み込めません。</span>';
+      },700);
+    }
+
+    async function scanWithBarcodeDetector(video){
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const tick = async()=>{
+        if(!scanning) return;
+        if(video.readyState === video.HAVE_ENOUGH_DATA){
+          canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+          ctx.drawImage(video,0,0,canvas.width,canvas.height);
+          try{
+            const found = await detector.detect(canvas);
+            if(found && found.length){ stopScan(); handleQR(found[0].rawValue || ""); return; }
+          }catch(e){}
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
+    function scanWithZXing(video){
+      if(!ensureZXing()) return $("#status").innerHTML = '<span class="err">ZXing未初期化。</span>';
+      zxingReader.decodeFromVideoDevice({facingMode:"environment"}, video, (result, err, controls)=>{
+        if(!scanning){ try{controls?.stop();}catch{} return; }
+        if(result){ stopScan(); try{controls?.stop();}catch{} handleQR(result.getText()); }
+      });
+    }
+    function scanWithJsQR(video){
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const tick = ()=>{
+        if(!scanning) return;
+        if(video.readyState === video.HAVE_ENOUGH_DATA){
+          canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+          ctx.drawImage(video,0,0,canvas.width,canvas.height);
+          try{
+            const img = ctx.getImageData(0,0,canvas.width,canvas.height);
+            const res = window.jsQR(img.data, img.width, img.height, { inversionAttempts:"dontInvert" });
+            if(res && res.data){ stopScan(); handleQR(res.data); return; }
+          }catch(e){}
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
+    function stopScan(){
+      scanning = false; $("#videoWrap").style.display = "none";
+      if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+      try{ zxingReader?.reset(); }catch(e){}
+    }
+
+    function handleQR(raw){
+      try{
+        const obj = JSON.parse(raw);
+        const inc = $("#incMisc").checked;
+        render(computeFromPayload(obj, inc));
+      }catch(e){
+        $("#status").innerHTML = '<span class="err">QR内JSONの解析に失敗しました（入力JSONか確認）。</span>';
+      }
+    }
+
+    // ===== Camera/Album photo decode (robust) =====
+    async function pickFromPhoto(file){
+      if(!file) return;
+      $("#status").textContent = "画像から解析中…";
+      // Try createImageBitmap first (often decodes HEIC even when <img> fails)
+      let bitmap = null;
+      try{
+        if('createImageBitmap' in window){
+          bitmap = await createImageBitmap(file);
+        }
+      }catch(e){ /* ignore */}
+      if(bitmap){
+        // draw to canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width; canvas.height = bitmap.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(bitmap,0,0);
+        await tryAllDecodersOnCanvas(canvas);
+        return;
+      }
+      // Fallback to <img> element
+      const img = new Image();
+      img.onload = async ()=>{
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d'); ctx.drawImage(img,0,0);
+        await tryAllDecodersOnCanvas(canvas);
+      };
+      img.onerror = ()=>{
+        $("#status").innerHTML = '<span class="err">画像を読み込めませんでした（HEICの可能性）。スクショでPNG化 or JPEG設定に変更してください。</span>';
+      };
+      const url = URL.createObjectURL(file);
+      img.src = url;
+    }
+
+    async function tryAllDecodersOnCanvas(canvas){
+      // 1) BarcodeDetector
+      if(await ensureDetector()){
+        try{
+          const codes = await detector.detect(canvas);
+          if(codes && codes.length){ handleQR(codes[0].rawValue||""); return; }
+        }catch(e){}
+      }
+      // 2) ZXing
+      if(ensureZXing()){
+        try{
+          const res = await window.ZXing.BrowserQRCodeReader.prototype.decodeFromImageUrl.call({}, canvas.toDataURL("image/png"));
+          if(res && res.getText){ handleQR(res.getText()); return; }
+        }catch(e){}
+      }
+      // 3) jsQR
+      if(ensureJsQR()){
+        try{
+          const ctx = canvas.getContext('2d');
+          const id = ctx.getImageData(0,0,canvas.width,canvas.height);
+          const r = window.jsQR(id.data, id.width, id.height, { inversionAttempts:"attemptBoth" });
+          if(r && r.data){ handleQR(r.data); return; }
+        }catch(e){}
+      }
+      $("#status").innerHTML = '<span class="err">QRが見つかりませんでした。サイズ/コントラスト/ピントを見直してください。</span>';
+    }
+
+    // Demo JSON
+    const demo = { v:"OG-Quote-INPUT-v1", fxJpyIdr:"0x2EE0", containerCount:"0x1", freightPerContainerJPY:"0x186A0", pph22Pct:"0x19", ogMarginPct:"0x14", vatPct:"0x0B", ogMarginIncludeMisc:true, products:[ {name:"Overhead Door A", unitJPY:"0x017D7840", qty:"0x0A", marginPct:"0x0A", bmPct:"0x0A", miscIdrPerUnit:"0x0"} ] };
+
+    // Events
+    $("#scanBtn").addEventListener('click', startScan);
+    $("#stopBtn").addEventListener('click', stopScan);
+    $("#pickBtn").addEventListener('click', ()=> $("#filePickAlbum").click());
+    $("#shootBtn").addEventListener('click', ()=> $("#filePickCamera").click());
+    $("#filePickAlbum").addEventListener('change', e=> pickFromPhoto(e.target.files?.[0]));
+    $("#filePickCamera").addEventListener('change', e=> pickFromPhoto(e.target.files?.[0]));
+    $("#pasteBtn").addEventListener('click', ()=> $("#pasteArea").style.display="");
+    $("#parseBtn").addEventListener('click', ()=>{ try{ const obj = JSON.parse($("#jsonText").value.trim()); render(computeFromPayload(obj, $("#incMisc").checked)); }catch{ $("#status").innerHTML = '<span class="err">JSON解析に失敗しました。</span>'; } });
+    $("#demoBtn").addEventListener('click', ()=>{ render(computeFromPayload(demo, $("#incMisc").checked)); $("#status").innerHTML = '<span class="ok">デモJSONで計算しました。</span>'; });
+  </script>
+</body>
+</html>
